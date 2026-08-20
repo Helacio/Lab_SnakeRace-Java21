@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class Board {
   private final int width;
@@ -15,8 +16,9 @@ public final class Board {
   private final Set<Position> obstacles = new HashSet<>();
   private final Set<Position> turbo = new HashSet<>();
   private final Map<Position, Position> teleports = new HashMap<>();
+  private final AtomicInteger deathSeq = new AtomicInteger(0);
 
-  public enum MoveResult { MOVED, ATE_MOUSE, HIT_OBSTACLE, ATE_TURBO, TELEPORTED }
+  public enum MoveResult { MOVED, ATE_MOUSE, HIT_OBSTACLE, ATE_TURBO, TELEPORTED, SELF_COLLISION }
 
   public Board(int width, int height) {
     if (width <= 0 || height <= 0) throw new IllegalArgumentException("Board dimensions must be positive");
@@ -38,6 +40,8 @@ public final class Board {
 
   public synchronized MoveResult step(Snake snake) {
     Objects.requireNonNull(snake, "snake");
+    if (!snake.isAlive()) return MoveResult.SELF_COLLISION;
+
     var head = snake.head();
     var dir = snake.direction();
     Position next = new Position(head.x() + dir.dx, head.y() + dir.dy).wrap(width, height);
@@ -48,6 +52,15 @@ public final class Board {
     if (teleports.containsKey(next)) {
       next = teleports.get(next);
       teleported = true;
+    }
+
+    boolean willGrow = mice.contains(next);
+    var bodySnapshot = snake.snapshot();
+    Position tail = bodySnapshot.peekLast();
+    boolean selfCollision = bodySnapshot.contains(next) && !(next.equals(tail) && !willGrow);
+    if (selfCollision) {
+      snake.die(deathSeq.incrementAndGet());
+      return MoveResult.SELF_COLLISION;
     }
 
     boolean ateMouse = mice.remove(next);
