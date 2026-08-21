@@ -13,6 +13,7 @@ Laboratorio de programación concurrente: condiciones de carrera, sincronizació
 
 ---
 
+## Integrantes: Juan David Rangel, Hernán David Sánchez
 ## Cómo ejecutar
 
 ```bash
