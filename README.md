@@ -210,7 +210,40 @@ HashMap tampoco es thread-safe. Si no se protegiera adecuadamente, accesos concu
 **Sincronización innecesaria**
 ![Captura de pantalla 2026-02-05 113609.png](src/img/Captura%20de%20pantalla%202026-02-05%20113609.png)
 
-En la imagen podemos ver que estos métodos utilizan la palabra clave `synchronized`. Aunque estos métodos pueden ser llamados desde distintos hilos, no interactúan directamente con la lógica de 
-movimiento de las serpientes ni modifican el estado del tablero, por lo que su sincronización resulta innecesaria. 
+En la imagen podemos ver que estos métodos utilizan la palabra clave `synchronized`confirmamos que sí necesitan estar sincronizados. El hilo de Swing los usa cada vez que repinta la pantalla, y al mismo tiempo los hilos de las serpientes están modificando esas mismas colecciones dentro de step(). Si les quitáramos el synchronized volveríamos a tener condición de carrera. La sincronización innecesaria que sí encontramos y corregimos fue otra, la de la clase Snake, que se explica abajo.
+
+### 2) Correcciones mínimas y regiones críticas
+
+**La race que encontramos está clase Snake**
+
+Pensando mejor el problema, la condición de carrera más grave no estaba en Board sino en Snake. Snake guarda el cuerpo de la serpiente en un ArrayDeque, que no es seguro para hilos, y ese cuerpo lo modifica el hilo de la serpiente (cuando avanza) mientras que el hilo de Swing lo está leyendo al mismo tiempo para dibujar en pantalla. Y no había ningún synchronized protegiendo eso.
+
+El riesgo es que mientras un hilo está agregando o quitando posiciones del cuerpo, el otro hilo intente hacer una copia para dibujarla, y esa copia salga corrupta o lance una excepción rara. Justo el problema de "tearing" que pedía evitar el enunciado al pausar.
+
+Lo que hicimos fue poner synchronized solo en los métodos de Snake que tocan el cuerpo (avanzar, obtener la cabeza y sacar una copia/snapshot), que es lo mínimo que hace falta proteger. La dirección la dejamos como estaba, con volatile, porque ahí no hace falta un lock: es solo una referencia que se lee y se escribe, y si un hilo lee un valor un poco viejo no pasa nada grave, como mucho gira un tick después.
+
+**La pausa no pausaba nada**
+
+Nos dimos cuenta de que pausar el juego con el botón Action solo detenía el repintado de la pantalla, pero las serpientes seguían moviéndose por debajo sin que se viera. Eso incumple justo lo que pedía el enunciado sobre que el estado mostrado no quedara a medias.
+
+Para arreglarlo agregamos una clase pequeña llamada PauseController, que usa el mismo patrón de wait/notify que se trabajó en la Parte I: cuando el juego está pausado los hilos de las serpientes quedan dormidos esperando (sin gastar CPU en espera activa), y se despiertan solos cuando se reanuda. Como cada movimiento en el tablero ya es una operación atómica, un hilo que estaba moviéndose justo cuando se pulsó pausa termina ese movimiento normal y ahí sí se queda esperando, así que nunca se ve una serpiente "a medio mover".
+
+**Agregamos la muerte por chocar con uno mismo**
+
+No existía ninguna forma de que una serpiente muriera (chocar con un obstáculo solo la hacía rebotar), así que era imposible saber cuál fue "la peor serpiente". Agregamos la regla clásica de Snake: si la cabeza entra en una casilla que ya es parte de su propio cuerpo, la serpiente muere. Esto lo pusimos dentro del método step del tablero, que ya estaba sincronizado, así que no tuvimos que agregar ningún lock nuevo. También usamos un contador compartido para saber en qué orden van muriendo las serpientes, sin que se pisen entre ellas si mueren casi al mismo tiempo.
+
+### 3) Control de ejecución seguro (UI)
+
+Ahora el botón Action, cuando pausa el juego, también calcula y muestra arriba de la ventana:
+- la serpiente viva más larga en ese momento, y
+- la peor serpiente, es decir la que murió primero.
+
+Estos datos se leen usando los mismos métodos sincronizados de Snake, así que no hay riesgo de leer un estado a medias aunque algún hilo apenas esté terminando su último movimiento cuando se pausa. Además pintamos las serpientes muertas de color gris para que se note a simple vista cuáles ya no siguen en juego.
+
+### 4) Robustez bajo carga
+
+- Una prueba que confirma que la pausa realmente bloquea y libera los hilos como se espera.
+
+Con mvn clean verify todo compila y las pruebas nuevas pasan sin problema.
 
 
